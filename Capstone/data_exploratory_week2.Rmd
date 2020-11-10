@@ -1,0 +1,227 @@
+---
+title: "Exploratory Anlysis Week2"
+author: "Yongxiao Zhou"
+date: "11/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+## Exploratory Analysis
+We want to take a look at the raw data in news, blogs, and twitter, especially how large the data set is. Then we can determine the sample size to analysis. If it is too big, we will select a portion and analyze. Briefly speaking, we remove words from the document, such as web links, punctuations. After cleaning, we check the frequency of each single word in the documents, as well as 2 gram words, 3 gram words and 4 gram words
+
+The basic idea for the prediction algorithm will be, whenever the user input a word, or couple words, the program use the last 3 words, 2 words, and 1 word to check possible combinations from the results of N-gram words list, and pick the highest 5 frequency or less.
+
+# Load the data and packages
+```{r, message=FALSE}
+library(tm)
+library(NLP)
+library(ggplot2)
+library(ggpubr)
+wd <- getwd()
+wd <- paste(wd,'/final/en_US', sep = "")
+setwd(wd)
+twitter_raw <- readLines("en_US.twitter.txt", warn = FALSE)
+blogs_raw <- readLines("en_US.blogs.txt", warn = FALSE)
+news_raw <- readLines("en_US.news.txt", warn = FALSE)
+```
+check the dimension of three raw files
+```{r}
+len.twitter <- length(twitter_raw)
+len.blogs <- length(blogs_raw)
+len.news <- length(news_raw)
+len.blogs
+len.news
+len.twitter
+```
+
+It looks like we have 2 millions of line in twitter files, and 900K in blogs, and 77k in news. We decide to take 5% of the totle length of each data set , and because it is randomly selection, the results should still be representative
+```{r}
+set.seed(100)
+twitter <- sample(as.list(twitter_raw), floor(length(as.list(twitter_raw))/20))
+blogs <- sample(as.list(blogs_raw), floor(length(as.list(blogs_raw))/20))
+news <- sample(as.list(news_raw), floor(length(as.list(news_raw))/20))
+```
+
+Then, we clean the dataset, and find out what is the frequecy of each word in blogs dataset
+```{r}
+removeURL <- function(x) gsub("http[[:alnum:][:punct:]]*", "", x) #remove url
+removeHashTags <- function(x) gsub("#\\S+", "", x)
+removeTwitterHandles <- function(x) gsub("@\\S+", "", x)
+filter_blogdata <- lapply(blogs,removeURL)
+filter_blogdata <- lapply(filter_blogdata,removeHashTags)
+filter_blogdata <- tm::VCorpus(VectorSource(filter_blogdata))
+filter_blogdata <- tm::tm_map(filter_blogdata, removeWords, stopwords('english'))
+filter_blogdata <- tm::tm_map(filter_blogdata, removePunctuation)
+filter_blogdata <- tm::tm_map(filter_blogdata, removeNumbers)
+tdm_blogdata <- tm::TermDocumentMatrix(filter_blogdata)
+freq.blog <- data.frame("frequency" = slam::row_sums(tdm_blogdata), "word" = tdm_blogdata$dimnames$Terms)
+freq.blog <- (freq.blog[order(freq.blog$frequency, decreasing = TRUE),])
+rownames(freq.blog) <- c()
+```
+
+Similarly, we apply to all other datasets 
+```{r, echo=FALSE}
+filter_newsdata <- lapply(news,removeURL)
+filter_newsdata <- lapply(filter_newsdata,removeHashTags)
+filter_newsdata <- tm::VCorpus(VectorSource(filter_newsdata))
+filter_newsdata <- tm::tm_map(filter_newsdata, removeWords, stopwords('english'))
+filter_newsdata <- tm::tm_map(filter_newsdata, removeNumbers)
+filter_newsdata <- tm::tm_map(filter_newsdata, removePunctuation)
+tdm_newsdata <- tm::TermDocumentMatrix(filter_newsdata)
+freq.news <- data.frame("frequency" = slam::row_sums(tdm_newsdata), "word" = tdm_newsdata$dimnames$Terms)
+freq.news <- (freq.news[order(freq.news$frequency, decreasing = TRUE),])
+rownames(freq.news) <- c()
+
+#check twitter
+filter_twitterdata <- lapply(twitter,removeURL)
+filter_twitterdata <- lapply(filter_twitterdata,removeHashTags)
+filter_twitterdata <- tm::VCorpus(VectorSource(filter_twitterdata))
+filter_twitterdata <- tm::tm_map(filter_twitterdata, removeWords, stopwords('english'))
+filter_twitterdata <- tm::tm_map(filter_twitterdata, removePunctuation)
+filter_twitterdata <- tm::tm_map(filter_twitterdata, removeNumbers)
+tdm_twitterdata <- tm::TermDocumentMatrix(filter_twitterdata)
+freq.twitter <- data.frame("frequency" = slam::row_sums(tdm_twitterdata), "word" = tdm_twitterdata$dimnames$Terms)
+freq.twitter <- (freq.twitter[order(freq.twitter$frequency, decreasing = TRUE),])
+rownames(freq.twitter) <- c()
+```
+We can plot the words from all 3 datasets and take a look
+```{r}
+freq.blog$word <- reorder(freq.blog$word, freq.blog$frequency)
+freq.news$word <- reorder(freq.news$word, freq.news$frequency)
+freq.twitter$word <- reorder(freq.twitter$word, freq.twitter$frequency)
+
+plot.blog <- ggplot(freq.blog[c(1:25),], aes(x = word, y = frequency))
+plot.blog <- plot.blog + geom_bar(stat = "identity") + coord_flip() +
+  labs(title = "Blog Word Frequecy")
+
+plot.news <- ggplot(freq.news[c(1:25),], aes(x = word, y = frequency))
+plot.news <- plot.news + geom_bar(stat = "identity") + coord_flip() +
+  labs(title = "News Word Frequecy")
+
+plot.twitter <- ggplot(freq.twitter[c(1:25),], aes(x = word, y = frequency))
+plot.twitter <- plot.twitter + geom_bar(stat = "identity") + coord_flip() + 
+  labs(title = "Twitter Word Frequecy")
+figure <- ggarrange(plot.blog, plot.news, plot.twitter,
+                 
+                    ncol = 3, nrow = 1)
+figure
+```
+
+Similarly, we can do the 2 grams, 3 grams,and 4 grams. define those tokenizer first
+```{r}
+BigramTokenizer <- function(x)
+                unlist(lapply(ngrams(words(x), 2), paste, collapse = " "), use.names = FALSE)
+TrigramTokenizer <- function(x)
+        unlist(lapply(ngrams(words(x), 3), paste, collapse = " "), use.names = FALSE)
+FourgramTokenizer <- function(x)
+        unlist(lapply(ngrams(words(x), 4), paste, collapse = " "), use.names = FALSE)
+```
+2 grams
+```{r}
+bigram.tdm.blog <- tm::TermDocumentMatrix(filter_blogdata, control = list(tokenize = BigramTokenizer))
+freq.bigram.blog <- data.frame("frequency" = slam::row_sums(bigram.tdm.blog), "word" = bigram.tdm.blog$dimnames$Terms)
+freq.bigram.blog <- (freq.bigram.blog[order(freq.bigram.blog$frequency, decreasing = TRUE),])
+
+bigram.tdm.news <- tm::TermDocumentMatrix(filter_newsdata, control = list(tokenize = BigramTokenizer))
+freq.bigram.news <- data.frame("frequency" = slam::row_sums(bigram.tdm.news), "word" = bigram.tdm.news$dimnames$Terms)
+freq.bigram.news <- (freq.bigram.news[order(freq.bigram.news$frequency, decreasing = TRUE),])
+
+bigram.tdm.twitter <- tm::TermDocumentMatrix(filter_twitterdata, control = list(tokenize = BigramTokenizer))
+freq.bigram.twitter <- data.frame("frequency" = slam::row_sums(bigram.tdm.twitter), "word" = bigram.tdm.twitter$dimnames$Terms)
+freq.bigram.twitter <- (freq.bigram.twitter[order(freq.bigram.twitter$frequency, decreasing = TRUE),])
+
+freq.bigram.blog$word <- reorder(freq.bigram.blog$word, freq.bigram.blog$frequency)
+freq.bigram.news$word <- reorder(freq.bigram.news$word, freq.bigram.news$frequency)
+freq.bigram.twitter$word <- reorder(freq.bigram.twitter$word, freq.bigram.twitter$frequency)
+
+plot.blog <- ggplot(freq.bigram.blog[c(1:25),], aes(x = word, y = frequency))
+plot.blog <- plot.blog + geom_bar(stat = "identity") + coord_flip() +
+  labs(title = "Blog Word Frequecy")
+
+plot.news <- ggplot(freq.bigram.news[c(1:25),], aes(x = word, y = frequency))
+plot.news <- plot.news + geom_bar(stat = "identity") + coord_flip() +
+  labs(title = "News Word Frequecy")
+
+plot.twitter <- ggplot(freq.bigram.twitter[c(1:25),], aes(x = word, y = frequency))
+plot.twitter <- plot.twitter + geom_bar(stat = "identity") + coord_flip() + 
+  labs(title = "Twitter Word Frequecy")
+figure <- ggarrange(plot.blog, plot.news, plot.twitter,
+                 
+                    ncol = 3, nrow = 1)
+figure
+```
+
+3 GRAMS
+```{r}
+trigram.tdm.blog <- tm::TermDocumentMatrix(filter_blogdata, control = list(tokenize = TrigramTokenizer))
+freq.trigram.blog <- data.frame("frequency" = slam::row_sums(trigram.tdm.blog), "word" = trigram.tdm.blog$dimnames$Terms)
+freq.trigram.blog <- (freq.trigram.blog[order(freq.trigram.blog$frequency, decreasing = TRUE),])
+
+trigram.tdm.news <- tm::TermDocumentMatrix(filter_newsdata, control = list(tokenize = TrigramTokenizer))
+freq.trigram.news <- data.frame("frequency" = slam::row_sums(trigram.tdm.news), "word" = trigram.tdm.news$dimnames$Terms)
+freq.trigram.news <- (freq.trigram.news[order(freq.trigram.news$frequency, decreasing = TRUE),])
+
+trigram.tdm.twitter <- tm::TermDocumentMatrix(filter_twitterdata, control = list(tokenize = TrigramTokenizer))
+freq.trigram.twitter <- data.frame("frequency" = slam::row_sums(trigram.tdm.twitter), "word" = trigram.tdm.twitter$dimnames$Terms)
+freq.trigram.twitter <- (freq.trigram.twitter[order(freq.trigram.twitter$frequency, decreasing = TRUE),])
+
+freq.trigram.blog$word <- reorder(freq.trigram.blog$word, freq.trigram.blog$frequency)
+freq.trigram.news$word <- reorder(freq.trigram.news$word, freq.trigram.news$frequency)
+freq.trigram.twitter$word <- reorder(freq.trigram.twitter$word, freq.trigram.twitter$frequency)
+
+plot.blog <- ggplot(freq.trigram.blog[c(1:25),], aes(x = word, y = frequency))
+plot.blog <- plot.blog + geom_bar(stat = "identity") + coord_flip() +
+  labs(title = "Blog Word Frequecy")
+
+plot.news <- ggplot(freq.trigram.news[c(1:25),], aes(x = word, y = frequency))
+plot.news <- plot.news + geom_bar(stat = "identity") + coord_flip() +
+  labs(title = "News Word Frequecy")
+
+plot.twitter <- ggplot(freq.trigram.twitter[c(1:25),], aes(x = word, y = frequency))
+plot.twitter <- plot.twitter + geom_bar(stat = "identity") + coord_flip() + 
+  labs(title = "Twitter Word Frequecy")
+figure <- ggarrange(plot.blog, plot.news, plot.twitter,
+                 
+                    ncol = 3, nrow = 1)
+figure
+```
+
+4 GRAMS
+```{r}
+fourgram.tdm.blog <- tm::TermDocumentMatrix(filter_blogdata, control = list(tokenize = FourgramTokenizer))
+freq.fourgram.blog <- data.frame("frequency" = slam::row_sums(fourgram.tdm.blog), "word" = fourgram.tdm.blog$dimnames$Terms)
+freq.fourgram.blog <- (freq.fourgram.blog[order(freq.fourgram.blog$frequency, decreasing = TRUE),])
+
+fourgram.tdm.news <- tm::TermDocumentMatrix(filter_newsdata, control = list(tokenize = FourgramTokenizer))
+freq.fourgram.news <- data.frame("frequency" = slam::row_sums(fourgram.tdm.news), "word" = fourgram.tdm.news$dimnames$Terms)
+freq.fourgram.news <- (freq.fourgram.news[order(freq.fourgram.news$frequency, decreasing = TRUE),])
+
+fourgram.tdm.twitter <- tm::TermDocumentMatrix(filter_twitterdata, control = list(tokenize = FourgramTokenizer))
+freq.fourgram.twitter <- data.frame("frequency" = slam::row_sums(fourgram.tdm.twitter), "word" = fourgram.tdm.twitter$dimnames$Terms)
+freq.fourgram.twitter <- (freq.fourgram.twitter[order(freq.fourgram.twitter$frequency, decreasing = TRUE),])
+
+freq.fourgram.blog$word <- reorder(freq.fourgram.blog$word, freq.fourgram.blog$frequency)
+freq.fourgram.news$word <- reorder(freq.fourgram.news$word, freq.fourgram.news$frequency)
+freq.fourgram.twitter$word <- reorder(freq.fourgram.twitter$word, freq.fourgram.twitter$frequency)
+
+plot.blog <- ggplot(freq.fourgram.blog[c(1:25),], aes(x = word, y = frequency))
+plot.blog <- plot.blog + geom_bar(stat = "identity") + coord_flip() +
+  labs(title = "Blog Word Frequecy")
+
+plot.news <- ggplot(freq.fourgram.news[c(1:25),], aes(x = word, y = frequency))
+plot.news <- plot.news + geom_bar(stat = "identity") + coord_flip() +
+  labs(title = "News Word Frequecy")
+
+plot.twitter <- ggplot(freq.fourgram.twitter[c(1:25),], aes(x = word, y = frequency))
+plot.twitter <- plot.twitter + geom_bar(stat = "identity") + coord_flip() + 
+  labs(title = "Twitter Word Frequecy")
+figure <- ggarrange(plot.blog, plot.news, plot.twitter,
+                 
+                    ncol = 3, nrow = 1)
+figure
+```
+
+So, next step will be further anaylyze the tokens
